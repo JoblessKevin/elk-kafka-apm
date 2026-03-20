@@ -1,0 +1,143 @@
+services:
+  # --- 核心大倉庫 ---
+  elasticsearch:
+    image: elasticsearch:7.14.0
+    container_name: elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elk_data:/usr/share/elasticsearch/data/
+      - ./elk-config/elasticsearch/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
+    environment:
+      - discovery.type=single-node
+      - http.host=0.0.0.0
+      - transport.host=0.0.0.0
+      - xpack.security.enabled=true
+      - cluster.name=elasticsearch
+      - bootstrap.memory_lock=true
+      - ELASTIC_PASSWORD=admin123
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    networks:
+      - elk
+
+  kibana:
+    image: kibana:7.14.0
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    volumes:
+      - ./elk-config/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml
+      - kb_data:/usr/share/kibana/data
+    networks:
+      - elk
+    environment:
+      - ELASTIC_PASSWORD=admin123
+      - ELASTICSEARCH_USERNAME=elastic
+      - xpack.apm.serviceMapEnabled=true
+    depends_on:
+      - elasticsearch
+
+  # --- 新增的緩衝層 (Kafka & Zookeeper) ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.2
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - elk
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    networks:
+      - elk
+
+  # --- 搬運工與情報收發室 ---
+  logstash:
+    image: logstash:7.14.0
+    container_name: logstash
+    ports:
+      - "5044:5044"
+      - "9600:9600"
+    volumes:
+      - ./elk-config/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+      - ./elk-config/logstash/logstash.yml:/usr/share/logstash/config/logstash.yml
+      - ls_data:/usr/share/logstash/data
+    networks:
+      - elk
+    depends_on:
+      - elasticsearch
+      - kafka
+
+  apm-server:
+    image: docker.elastic.co/apm/apm-server:7.14.0
+    container_name: apm-server
+    ports:
+      - "8200:8200"  
+    volumes:
+      - ./elk-config/apm-server/apm-server.yml:/usr/share/apm-server/apm-server.yml
+    networks:
+      - elk
+    depends_on:
+      - elasticsearch
+      - kafka
+
+  # --- 其他輔助工具 ---
+  filebeat:
+    image: elastic/filebeat:7.14.0
+    container_name: filebeat
+    user: root
+    command: ["filebeat", "-e", "--strict.perms=false"]
+    volumes:
+      - ./elk-config/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log/syslog:/var/log/syslog:ro
+      - /var/log/auth.log:/var/log/auth.log:ro
+    networks:
+      - elk
+    depends_on:
+      - elasticsearch
+      - kibana
+
+  nginx:
+    image: nginx:1.25
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./elk-config/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./elk-config/nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - kibana
+      - apm-server
+      - elasticsearch
+
+networks:
+  elk:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"
+
+volumes:
+  elk_data:
+  ls_data:
+  kb_data:

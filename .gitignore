@@ -1,0 +1,19 @@
+# Docker data directories
+elk_data/
+ls_data/
+kb_data/
+
+# Logs
+*.log
+logs/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.idea/
+.vscode/
+
+# Backup files
+*.bak
