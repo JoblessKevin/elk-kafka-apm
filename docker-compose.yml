@@ -1,5 +1,4 @@
 services:
-  # --- 核心大倉庫 ---
   elasticsearch:
     image: elasticsearch:7.14.0
     container_name: elasticsearch
@@ -25,7 +24,6 @@ services:
     networks:
       - elk
 
-  # --- [新增] 自動初始化規則 (一次性任務) ---
   elastic-init:
     image: curlimages/curl:latest
     container_name: elastic-init
@@ -34,16 +32,8 @@ services:
     depends_on:
       - elasticsearch
     entrypoint: ["/bin/sh", "-c"]
-    command: >
-      "
-      until [ $(curl -s -o /dev/null -w '%{http_code}' -u elastic:admin123 http://elasticsearch:9200) -eq 200 ]; do
-        echo '等待 Elasticsearch 啟動...';
-        sleep 5;
-      done;
-      echo 'Elasticsearch 已就緒，正在建立 ILM 14天刪除規則...';
-      curl -X PUT 'http://elasticsearch:9200/_ilm/policy/apm-retention-policy'            -u elastic:admin123            -H 'Content-Type: application/json'            -d '{\"policy\":{\"phases\":{\"hot\":{\"actions\":{\"rollover\":{\"max_size\":\"50gb\",\"max_age\":\"1d\"}}},\"delete\":{\"min_age\":\"14d\",\"actions\":{\"delete\":{}}}}}}';
-      echo 'ILM 規則設定完成！';
-      "
+    command:
+      - "echo '等待 Elasticsearch 啟動...' && curl --retry 10 --retry-delay 5 --retry-connrefused -s -u elastic:admin123 http://elasticsearch:9200 && echo '1. 正在建立 ILM 14天刪除規則...' && curl -s -X PUT 'http://elasticsearch:9200/_ilm/policy/apm-retention-policy' -u elastic:admin123 -H 'Content-Type: application/json' -d '{\"policy\":{\"phases\":{\"hot\":{\"actions\":{\"rollover\":{\"max_size\":\"50gb\",\"max_age\":\"1d\"}}},\"delete\":{\"min_age\":\"14d\",\"actions\":{\"delete\":{}}}}}}' && echo '2. 正在綁定 ILM 規則至 apm-* 索引模板...' && curl -s -X PUT 'http://elasticsearch:9200/_index_template/apm_ilm_template' -u elastic:admin123 -H 'Content-Type: application/json' -d '{\"index_patterns\":[\"apm-*\"],\"template\":{\"settings\":{\"index.lifecycle.name\":\"apm-retention-policy\"}},\"priority\":500}' && echo '所有 Elasticsearch 自動化設定完成！'"
 
   kibana:
     image: kibana:7.14.0
