@@ -1,0 +1,59 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  kafka/traces_in:
+    protocol_version: 2.0.0
+    brokers:
+      - kafka:9092
+    topic: otel-traces
+    group_id: otel-collector-consumer
+    initial_offset: latest
+
+  kafka/metrics_in:
+    protocol_version: 2.0.0
+    brokers:
+      - kafka:9092
+    topic: otel-metrics
+    group_id: otel-collector-consumer
+    initial_offset: latest
+
+exporters:
+  kafka/traces_out:
+    protocol_version: 2.0.0
+    brokers:
+      - kafka:9092
+    topic: otel-traces
+
+  kafka/metrics_out:
+    protocol_version: 2.0.0
+    brokers:
+      - kafka:9092
+    topic: otel-metrics
+
+  elasticsearch:
+    endpoints: ["http://elasticsearch:9200"]
+    user: "elastic"
+    password: "${env:ELASTIC_PASSWORD}"
+
+service:
+  pipelines:
+    # --- Pipeline A1: OTLP Ingestion to Kafka (Producer) ---
+    traces/ingest:
+      receivers: [otlp]
+      exporters: [kafka/traces_out]
+    metrics/ingest:
+      receivers: [otlp]
+      exporters: [kafka/metrics_out]
+
+    # --- Pipeline A2: Kafka Consumer to Elasticsearch (Shipper) ---
+    traces/export:
+      receivers: [kafka/traces_in]
+      exporters: [elasticsearch]
+    metrics/export:
+      receivers: [kafka/metrics_in]
+      exporters: [elasticsearch]

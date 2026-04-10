@@ -6,11 +6,14 @@ filebeat.inputs:
 processors:
   - add_docker_metadata: ~
 
-output.elasticsearch:
-  hosts: ["elasticsearch:9200"]
-  username: "elastic"
-  password: "admin123"
-  index: "filebeat-%{[agent.version]}-%{+yyyy.MM.dd}"
+output.kafka:
+  hosts: ["kafka:9092"]
+  topic: 'otel-logs'
+  partition.round_robin:
+    reachable_only: false
+  required_acks: 1
+  compression: gzip
+  max_message_bytes: 1000000
 
 setup.template.name: "filebeat"
 setup.template.pattern: "filebeat-*"
