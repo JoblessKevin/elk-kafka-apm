@@ -2,6 +2,6 @@ server.name: kibana
 server.host: 0.0.0.0
 elasticsearch.hosts: [ "http://elasticsearch:9200" ]
 elasticsearch.username: "kibana_system"
-elasticsearch.password: "${KIBANA_SYSTEM_PASSWORD}"
+elasticsearch.password: "${ELASTIC_PASSWORD}"
 monitoring.ui.container.elasticsearch.enabled: true
 xpack.apm.serviceMapEnabled: true # 開啟漂亮的服務拓樸圖
