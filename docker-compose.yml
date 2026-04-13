@@ -86,6 +86,39 @@ services:
     networks:
       - elk
 
+  kafka-init:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: kafka-init
+    depends_on:
+      - kafka
+    networks:
+      - elk
+    command: >
+      bash -c "
+        echo 'Waiting for Kafka to be ready...'
+        cub kafka-ready -b kafka:9092 1 60
+        echo 'Creating Kafka topics...'
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 10 --replication-factor 1 --topic otel-logs
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 5 --replication-factor 1 --topic otel-traces
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 2 --replication-factor 1 --topic otel-metrics
+        echo 'Kafka topics created.'
+      "
+
+  apm-server:
+    image: elastic/apm-server:${ELASTIC_VERSION}
+    container_name: apm-server
+    ports:
+      - "8200:8200"
+    volumes:
+      - ./elk-config/apm-server/apm-server.yml:/usr/share/apm-server/apm-server.yml:ro
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+    networks:
+      - elk
+    depends_on:
+      - elasticsearch
+      - kibana
+
   logstash:
     image: logstash:${ELASTIC_VERSION}
     container_name: logstash

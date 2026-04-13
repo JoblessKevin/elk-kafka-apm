@@ -39,10 +39,10 @@ exporters:
     metrics:
       topic: otel-metrics
 
-  elasticsearch:
-    endpoints: ["http://elasticsearch:9200"]
-    user: "elastic"
-    password: "${env:ELASTIC_PASSWORD}"
+  otlp_http:
+    endpoint: "http://apm-server:8200"
+    tls:
+      insecure: true
 
 service:
   pipelines:
@@ -54,10 +54,10 @@ service:
       receivers: [otlp]
       exporters: [kafka/metrics_out]
 
-    # --- Pipeline A2: Kafka Consumer to Elasticsearch (Shipper) ---
+    # --- Pipeline A2: Kafka Consumer to APM Server (Shipper) ---
     traces/export:
       receivers: [kafka/traces_in]
-      exporters: [elasticsearch]
+      exporters: [otlp_http]
     metrics/export:
       receivers: [kafka/metrics_in]
-      exporters: [elasticsearch]
+      exporters: [otlp_http]
