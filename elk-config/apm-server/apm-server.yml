@@ -1,13 +1,28 @@
 apm-server:
   host: "0.0.0.0:8200"
+  register.ingest.pipeline.enabled: true  
   rum:
     enabled: true
+    allow_origins: ["*"]
 
-output.kafka:
+  ilm:
+    enabled: auto
+    setup:
+      enabled: true
+      overwrite: true
+      require_policy: true
+
+output.elasticsearch:
   enabled: true
-  hosts: ["kafka:9092"]
-  topic: "apm"
-  partition.round_robin:
-    reachable_only: false
-  required_acks: 1
-  compression: gzip
+  hosts: ["http://elasticsearch:9200"]
+  protocol: "http"
+  username: "elastic"
+  password: "${ELASTIC_PASSWORD}"
+  
+setup.kibana:
+  host: "http://kibana:5601"
+
+logging:
+  level: info
+  to_files: false
+  to_stderr: true

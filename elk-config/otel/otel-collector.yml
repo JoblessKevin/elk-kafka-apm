@@ -1,0 +1,63 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  kafka/traces_in:
+    protocol_version: 2.0.0
+    brokers:
+      - kafka:9092
+    traces:
+      topics: [otel-traces]
+    group_id: otel-collector-consumer
+    initial_offset: latest
+
+  kafka/metrics_in:
+    protocol_version: 2.0.0
+    brokers:
+      - kafka:9092
+    metrics:
+      topics: [otel-metrics]
+    group_id: otel-collector-consumer
+    initial_offset: latest
+
+exporters:
+  kafka/traces_out:
+    protocol_version: 2.0.0
+    brokers:
+      - kafka:9092
+    traces:
+      topic: otel-traces
+
+  kafka/metrics_out:
+    protocol_version: 2.0.0
+    brokers:
+      - kafka:9092
+    metrics:
+      topic: otel-metrics
+
+  otlp_http:
+    endpoint: "http://apm-server:8200"
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    # --- Pipeline A1: OTLP Ingestion to Kafka (Producer) ---
+    traces/ingest:
+      receivers: [otlp]
+      exporters: [kafka/traces_out]
+    metrics/ingest:
+      receivers: [otlp]
+      exporters: [kafka/metrics_out]
+
+    # --- Pipeline A2: Kafka Consumer to APM Server (Shipper) ---
+    traces/export:
+      receivers: [kafka/traces_in]
+      exporters: [otlp_http]
+    metrics/export:
+      receivers: [kafka/metrics_in]
+      exporters: [otlp_http]

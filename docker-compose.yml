@@ -1,6 +1,29 @@
 services:
+
+  # Setup container to securely initialize Elasticsearch passwords/roles
+  setup:
+    profiles:
+      - setup
+    build:
+      context: setup/
+      args:
+        ELASTIC_VERSION: ${ELASTIC_VERSION}
+    init: true
+    volumes:
+      - ./setup/entrypoint.sh:/entrypoint.sh:ro,Z
+      - ./setup/lib.sh:/lib.sh:ro,Z
+      - ./setup/roles:/roles:ro,Z
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
+      LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
+      KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
+    networks:
+      - elk
+    depends_on:
+      - elasticsearch
+
   elasticsearch:
-    image: elasticsearch:7.14.0
+    image: elasticsearch:${ELASTIC_VERSION}
     container_name: elasticsearch
     ports:
       - "9200:9200"
@@ -9,14 +32,11 @@ services:
       - elk_data:/usr/share/elasticsearch/data/
       - ./elk-config/elasticsearch/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
     environment:
+      - node.name=elasticsearch
       - discovery.type=single-node
-      - http.host=0.0.0.0
-      - transport.host=0.0.0.0
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
       - xpack.security.enabled=true
-      - cluster.name=elasticsearch
-      - bootstrap.memory_lock=true
-      - ELASTIC_PASSWORD=admin123
-      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
     ulimits:
       memlock:
         soft: -1
@@ -24,31 +44,19 @@ services:
     networks:
       - elk
 
-  elastic-init:
-    image: curlimages/curl:latest
-    container_name: elastic-init
-    networks:
-      - elk
-    depends_on:
-      - elasticsearch
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - "echo '等待 Elasticsearch 啟動...' && curl --retry 10 --retry-delay 5 --retry-connrefused -s -u elastic:admin123 http://elasticsearch:9200 && echo '1. 正在建立 ILM 14天刪除規則...' && curl -s -X PUT 'http://elasticsearch:9200/_ilm/policy/apm-retention-policy' -u elastic:admin123 -H 'Content-Type: application/json' -d '{\"policy\":{\"phases\":{\"hot\":{\"actions\":{\"rollover\":{\"max_size\":\"50gb\",\"max_age\":\"1d\"}}},\"delete\":{\"min_age\":\"14d\",\"actions\":{\"delete\":{}}}}}}' && echo '2. 正在綁定 ILM 規則至 apm-* 索引模板...' && curl -s -X PUT 'http://elasticsearch:9200/_index_template/apm_ilm_template' -u elastic:admin123 -H 'Content-Type: application/json' -d '{\"index_patterns\":[\"apm-*\"],\"template\":{\"settings\":{\"index.lifecycle.name\":\"apm-retention-policy\"}},\"priority\":500}' && echo '所有 Elasticsearch 自動化設定完成！'"
-
   kibana:
-    image: kibana:7.14.0
+    image: kibana:${ELASTIC_VERSION}
     container_name: kibana
     ports:
       - "5601:5601"
     volumes:
       - ./elk-config/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml
       - kb_data:/usr/share/kibana/data
+    environment:
+      - ELASTIC_USERNAME=kibana_system
+      - ELASTIC_PASSWORD=${KIBANA_SYSTEM_PASSWORD}
     networks:
       - elk
-    environment:
-      - ELASTIC_PASSWORD=admin123
-      - ELASTIC_USERNAME=elastic
-      - xpack.apm.serviceMapEnabled=true
     depends_on:
       - elasticsearch
 
@@ -78,8 +86,41 @@ services:
     networks:
       - elk
 
+  kafka-init:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: kafka-init
+    depends_on:
+      - kafka
+    networks:
+      - elk
+    command: >
+      bash -c "
+        echo 'Waiting for Kafka to be ready...'
+        cub kafka-ready -b kafka:9092 1 60
+        echo 'Creating Kafka topics...'
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 10 --replication-factor 1 --topic otel-logs
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 5 --replication-factor 1 --topic otel-traces
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 2 --replication-factor 1 --topic otel-metrics
+        echo 'Kafka topics created.'
+      "
+
+  apm-server:
+    image: elastic/apm-server:${ELASTIC_VERSION}
+    container_name: apm-server
+    ports:
+      - "8200:8200"
+    volumes:
+      - ./elk-config/apm-server/apm-server.yml:/usr/share/apm-server/apm-server.yml:ro
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+    networks:
+      - elk
+    depends_on:
+      - elasticsearch
+      - kibana
+
   logstash:
-    image: logstash:7.14.0
+    image: logstash:${ELASTIC_VERSION}
     container_name: logstash
     ports:
       - "5044:5044"
@@ -88,19 +129,9 @@ services:
       - ./elk-config/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
       - ./elk-config/logstash/logstash.yml:/usr/share/logstash/config/logstash.yml
       - ls_data:/usr/share/logstash/data
-    networks:
-      - elk
-    depends_on:
-      - elasticsearch
-      - kafka
-
-  apm-server:
-    image: docker.elastic.co/apm/apm-server:7.14.0
-    container_name: apm-server
-    ports:
-      - "8200:8200"
-    volumes:
-      - ./elk-config/apm-server/apm-server.yml:/usr/share/apm-server/apm-server.yml
+    environment:
+      - LOGSTASH_INTERNAL_PASSWORD=${LOGSTASH_INTERNAL_PASSWORD}
+      - LS_JAVA_OPTS=-Xms1g -Xmx1g
     networks:
       - elk
     depends_on:
@@ -108,7 +139,7 @@ services:
       - kafka
 
   filebeat:
-    image: elastic/filebeat:7.14.0
+    image: elastic/filebeat:${ELASTIC_VERSION}
     container_name: filebeat
     user: root
     command: ["filebeat", "-e", "--strict.perms=false"]
@@ -121,8 +152,24 @@ services:
     networks:
       - elk
     depends_on:
+      - kafka
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+    volumes:
+      - ./elk-config/otel/otel-collector.yml:/etc/otel/config.yaml:ro
+    command: ["--config=/etc/otel/config.yaml"]
+    networks:
+      - elk
+    depends_on:
+      - kafka
       - elasticsearch
-      - kibana
 
   nginx:
     image: nginx:1.25
@@ -135,8 +182,10 @@ services:
       - ./elk-config/nginx/conf.d:/etc/nginx/conf.d
     depends_on:
       - kibana
-      - apm-server
+      - otel-collector
       - elasticsearch
+    networks:
+      - elk
 
 networks:
   elk:
