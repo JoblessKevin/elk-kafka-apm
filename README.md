@@ -75,25 +75,51 @@ Stepping away from weak developmental passwords. Leveraged by the `setup` initia
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start & Operations
 
 ### 1. Initialize Security & Passwords
-This command establishes the Elasticsearch cluster and executes the `setup` container to cement strong passwords:
+This command establishes the Elasticsearch cluster and executes the `setup` container to cement strong passwords. By using `run --rm`, the setup container automatically cleans itself up after completion to prevent leaving "ghost" containers behind:
 ```bash
-sudo docker compose --profile setup up -d
+sudo docker compose run --rm setup
 ```
-> **Tip**: Wait a few seconds for the initialization to complete. You can monitor the progress with `docker compose logs setup`.
 
 ### 2. Spin Up Microservice Pipeline
 ```bash
 sudo docker compose up -d
 ```
-This awakens all 8 microservices including Filebeat, Kafka, OTel Collector, Logstash, and Kibana. The `kafka-init` will also automatically exit once topic partitioning succeeds.
+This awakens all microservices including Filebeat, Kafka, OTel Collector, Logstash, and Kibana. The `kafka-init` container will safely coordinate the topic partitioning and then exit automatically.
 
-### 3. How to Access
+### 3. Graceful Shutdown
+To bring the entire cluster down and ensure no orphaned profile containers (such as the initialized scripts) are left hanging in your environment, always use:
+```bash
+sudo docker compose down --remove-orphans
+```
+
+### 4. How to Access
 - **Kibana Dashboard**: [http://localhost:5601](http://localhost:5601)
   - Username: `elastic`
   - Password: The strong password defined in `.env` (default is `changeme`)
 - **App Integration OTel Endpoints (Traces / Metrics)**: 
   - gRPC: `localhost:4317`
   - HTTP: `localhost:4318`
+
+---
+
+## 📊 Kibana Verification Workflow
+
+Once the pipeline is active and your application is producing telemetry, you can effortlessly verify the **"Three Pillars of Observability"** directly within Kibana's native UI:
+
+### 1. Verifying Logs
+1. From the left navigation menu, go to **Observability -> Logs**.
+2. Since we carefully configured Logstash to inject payload into standard ECS data streams, your Docker logs will instantly stream here without requiring manual Index Pattern mappings!
+3. Check the **Overview** dashboard to see the *Logs rate per minute* histogram. Bars in the graph confirm that the `Filebeat -> Kafka -> Logstash` pipeline is perfectly intact.
+
+### 2. Verifying Traces (APM)
+1. Navigate to **Observability -> APM -> Services**.
+2. If your OpenTelemetry Traces successfully transited the Kafka buffer and appropriately translated via the APM Server, you will see your microservices immediately populated here.
+3. Select any service to explore detailed **Transactions** (for exact endpoint latency distribution) and explore the **Dependencies** tab for the auto-generated Service Map topology architecture.
+
+### 3. Verifying Metrics
+1. Navigate to **Observability -> Metrics > Inventory**.
+2. If infrastructure or custom OTel application metrics are flowing properly via the `otel-metrics` topic, they will index securely into ECS unified standards.
+3. The UI will render high-level visual "Waffle Maps" depicting the live CPU usage, Memory, and System Load of your connected environments.
