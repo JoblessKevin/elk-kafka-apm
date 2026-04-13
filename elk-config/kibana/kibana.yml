@@ -4,4 +4,4 @@ elasticsearch.hosts: [ "http://elasticsearch:9200" ]
 elasticsearch.username: "kibana_system"
 elasticsearch.password: "${ELASTIC_PASSWORD}"
 monitoring.ui.container.elasticsearch.enabled: true
-xpack.apm.serviceMapEnabled: true # 開啟漂亮的服務拓樸圖
+xpack.apm.serviceMapEnabled: true # Enable beautiful Service Map topology
